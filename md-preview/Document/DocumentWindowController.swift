@@ -55,7 +55,7 @@ final class DocumentWindowController: NSWindowController, NSWindowDelegate, NSTo
     var currentMarkdown: String?
     var backHistory: [HistoryEntry] = []
     var forwardHistory: [HistoryEntry] = []
-    weak var navigationItem: NSToolbarItem?
+    weak var navigationItem: NSToolbarItemGroup?
     private var fileWatcher: FileWatcher?
     private let fullscreenToolbarTheme = FullscreenToolbarTheme()
     var isInspectorToggleSelected = false
