@@ -130,28 +130,36 @@ extension DocumentWindowController {
         }
     }
 
-    /// Back and forward as an AppKit-owned group rather than an
-    /// `NSSegmentedControl` in a custom view. A toolbar only keeps window-drag
-    /// regions around items it draws itself, so hosting a control here is what
-    /// cost the toolbar its drag surface in the first place.
+    /// Back and forward as a momentary segmented control hosted by a regular
+    /// toolbar item, matching the standard paired navigation appearance.
     private func makeNavigationItem(willBeInsertedIntoToolbar: Bool) -> NSToolbarItem {
         let back = NSLocalizedString("Back", comment: "Navigation toolbar back button")
         let forward = NSLocalizedString("Forward", comment: "Navigation toolbar forward button")
-        let backImage = NSImage(systemSymbolName: "chevron.left", accessibilityDescription: back) ?? NSImage()
-        let forwardImage = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: forward) ?? NSImage()
 
-        let item = NSToolbarItemGroup(itemIdentifier: .navigation,
-                                      images: [backImage, forwardImage],
-                                      selectionMode: .momentary,
-                                      labels: [back, forward],
-                                      target: self,
-                                      action: #selector(navigateHistory(_:)))
+        let backImage = NSImage(
+            systemSymbolName: "chevron.backward", accessibilityDescription: back
+        ) ?? NSImage()
+        let forwardImage = NSImage(
+            systemSymbolName: "chevron.forward", accessibilityDescription: forward
+        ) ?? NSImage()
+
+        let item = NSToolbarItem(itemIdentifier: .navigation)
         item.label = NSLocalizedString("Navigation", comment: "Navigation toolbar item label")
         item.paletteLabel = NSLocalizedString("Back and Forward", comment: "Navigation toolbar palette label")
         item.isNavigational = true
         item.autovalidates = false
-        item.subitems.first?.toolTip = back
-        item.subitems.last?.toolTip = forward
+
+        let control = NSSegmentedControl(
+            images: [backImage, forwardImage],
+            trackingMode: .momentary,
+            target: self,
+            action: #selector(navigateHistory(_:))
+        )
+        control.segmentStyle = .separated
+        control.setToolTip(back, forSegment: 0)
+        control.setToolTip(forward, forSegment: 1)
+
+        item.view = control
 
         if willBeInsertedIntoToolbar {
             navigationItem = item
@@ -160,8 +168,8 @@ extension DocumentWindowController {
         return item
     }
 
-    @objc private func navigateHistory(_ sender: NSToolbarItemGroup) {
-        switch sender.selectedIndex {
+    @objc private func navigateHistory(_ sender: NSSegmentedControl) {
+        switch sender.selectedSegment {
         case 0:
             guard let entry = backHistory.last else { return }
             present(url: entry.url, intent: .back)
@@ -178,12 +186,14 @@ extension DocumentWindowController {
         applyNavigationState(to: navigationItem)
     }
 
-    private func applyNavigationState(to item: NSToolbarItemGroup) {
+    private func applyNavigationState(to item: NSToolbarItem) {
+        guard let control = item.view as? NSSegmentedControl else { return }
         let hasHistory = !backHistory.isEmpty || !forwardHistory.isEmpty
         item.isHidden = !hasHistory
         item.isEnabled = hasHistory
-        item.subitems.first?.isEnabled = !backHistory.isEmpty
-        item.subitems.last?.isEnabled = !forwardHistory.isEmpty
+        control.isEnabled = hasHistory
+        control.setEnabled(!backHistory.isEmpty, forSegment: 0)
+        control.setEnabled(!forwardHistory.isEmpty, forSegment: 1)
     }
 
     /// A toggle as a plain NSButton hosted in a regular NSToolbarItem. On
