@@ -1319,45 +1319,4 @@ typedMath.destroy()
 typedMathHost.remove()
 
 
-for (const [label, source, position, expected, caret] of [
-  ['opening delimiter', '$$', 2, '$$\n\n$$', 3],
-  ['indented delimiter', '  $$', 4, '  $$\n  \n  $$', 7],
-  ['before existing content', '$$\nTail', 2, '$$\n\n$$\nTail', 3],
-  ['existing closer', '$$\nx\n$$', 2, '$$\n\nx\n$$', 3],
-  ['closing delimiter', '$$\nx\n$$', 7, '$$\nx\n$$\n', 8],
-  ['inside code fence', '```text\n$$\n```', 10, '```text\n$$\n\n```', 11],
-  ['inline delimiter', 'Text $$', 7, 'Text $$\n', 8],
-]) {
-  const host = document.createElement('div')
-  document.body.append(host)
-  const editor = window.MDEditor.create(host, source, {})
-  editor.focus()
-  editor.select(position)
-  const press = (key, ctrlKey = false) => host.querySelector('.cm-content').dispatchEvent(
-    new dom.window.KeyboardEvent('keydown', { key, ctrlKey, bubbles: true, cancelable: true }))
-  press('Enter')
-  check(`math Enter: ${label}`, editor.getMarkdown() === expected
-    && editor.getLinkSelection(false).from === caret)
-  press('z', true)
-  check(`math Enter undo: ${label}`, editor.getMarkdown() === source)
-  editor.destroy()
-  host.remove()
-}
-
-// Native text input can deliver a newline without invoking the Enter keymap.
-// Type each dollar separately so this also exercises incremental parsing.
-for (const initial of ['', 'Paragraph\n\n']) {
-  const host = document.createElement('div')
-  document.body.append(host)
-  const editor = window.MDEditor.create(host, initial, {})
-  editor.select(initial.length)
-  editor.insert('$')
-  editor.insert('$')
-  editor.insert('\n')
-  check('native newline completes newly typed math', editor.getMarkdown() === initial + '$$\n\n$$'
-    && editor.getLinkSelection(false).from === initial.length + 3)
-  editor.destroy()
-  host.remove()
-}
-
 process.exit(failures ? 1 : 0)

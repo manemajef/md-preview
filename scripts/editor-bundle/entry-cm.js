@@ -3006,40 +3006,6 @@ function insertLink(view) {
   return true
 }
 
-const autoCloseMath = EditorState.transactionFilter.of((tr) => {
-  const event = tr.annotation(Transaction.userEvent)
-  if (!tr.docChanged || (event !== "input" && event !== "input.type")) return tr
-  const state = tr.startState
-  const selection = state.selection.main
-  if (state.selection.ranges.length !== 1 || !selection.empty) return tr
-  const line = state.doc.lineAt(selection.head)
-  if (selection.head !== line.to || !/^ {0,3}\$\$[ \t]*$/.test(line.text)) return tr
-  const indent = line.text.slice(0, line.text.indexOf("$$"))
-  let newline = false
-  let changeCount = 0
-  let missingIndent = ""
-  tr.changes.iterChanges((from, to, _fromB, _toB, inserted) => {
-    changeCount++
-    const text = inserted.toString()
-    newline = from === line.to && to === from && (text === "\n" || text === `\n${indent}`)
-    missingIndent = text === "\n" ? indent : ""
-  })
-  if (changeCount !== 1 || !newline) return tr
-
-  // Reuse the Markdown parser to exclude code, closing delimiters, and blocks
-  // that already have a closer. Complete the newline regardless of whether
-  // it came from CodeMirror's keymap or WebKit's native input handling.
-  let node = syntaxTree(state).resolve(selection.head, -1)
-  while (node && node.name !== "UnclosedMathBlock") node = node.parent
-  if (!node || node.from !== line.from + line.text.indexOf("$$")) return tr
-
-  return [tr, {
-    changes: { from: tr.newSelection.main.head, insert: `${missingIndent}\n${indent}$$` },
-    selection: { anchor: tr.newSelection.main.head + missingIndent.length },
-    sequential: true,
-  }]
-})
-
 // A second fence typed inside an existing block is a deliberate closing mark,
 // so only a fence that starts its own line can be paired automatically.
 const autoClosedFence = Annotation.define()
@@ -3204,7 +3170,6 @@ window.MDEditor = {
           Prec.lowest(livePreview),
           alignInactiveHeadings,
           autoCloseFence,
-          autoCloseMath,
           closeBrackets(),
           // paragraphReflow deliberately omitted: the preview renders
           // single newlines as hard breaks, so the

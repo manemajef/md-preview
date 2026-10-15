@@ -51,9 +51,14 @@ An invalid command should show an error without changing the saved source: $\not
 
 An unfinished inline expression remains source: $x_1 + x_2
 
+## RTL
+משוואות Inline צריכות לעבוד גם ב-`RTL`: $f(x)=x^2$.
+
 ## Unfinished display block
 
 The final block deliberately has no closing delimiter. Its source and all following text must stay visible and editable. Add a closing delimiter on its own line to finish it.
+
+
 
 $$
 x^2 + y^2 = z^2
