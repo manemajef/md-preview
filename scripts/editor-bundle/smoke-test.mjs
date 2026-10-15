@@ -1319,4 +1319,23 @@ typedMath.destroy()
 typedMathHost.remove()
 
 
+// Exercise the production loader without requiring a network or duplicating it.
+const editorSwift = readFileSync(new URL('../../md-preview/Features/Editor/EditorHTML.swift', import.meta.url), 'utf8')
+const mathLoader = editorSwift.match(/window.__mdLoadMath = function \(\) \{[\s\S]*?\n        \};/)[0]
+dom.window.eval(mathLoader
+  .replace(/css.href = .*?;/, "css.href = 'math-test.css';")
+  .replace(/script.src = .*?;/, "script.src = 'math-test.js';"))
+const failedLoad = window.__mdLoadMath()
+const caughtFailure = failedLoad.catch(error => error)
+const loadError = new dom.window.Event('error')
+document.querySelector('link[href="math-test.css"]').dispatchEvent(loadError)
+check('math loader propagates asset failures', await caughtFailure === loadError)
+check('math loader removes failed asset elements', !document.querySelector('[href="math-test.css"], [src="math-test.js"]'))
+const retryLoad = window.__mdLoadMath()
+check('math loader retries after failure', retryLoad !== failedLoad)
+document.querySelector('link[href="math-test.css"]').dispatchEvent(new dom.window.Event('load'))
+document.querySelector('script[src="math-test.js"]').dispatchEvent(new dom.window.Event('load'))
+await retryLoad
+check('math loader caches successful loads', window.__mdLoadMath() === retryLoad)
+
 process.exit(failures ? 1 : 0)

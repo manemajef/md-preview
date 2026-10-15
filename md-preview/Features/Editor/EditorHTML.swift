@@ -698,7 +698,12 @@ nonisolated enum EditorHTML {
                     script.onerror = reject;
                 });
                 document.head.appendChild(script);
-                window.__mdMathLoading = Promise.all([styleReady, scriptReady]);
+                window.__mdMathLoading = Promise.all([styleReady, scriptReady]).catch((error) => {
+                    css.remove();
+                    script.remove();
+                    window.__mdMathLoading = null;
+                    throw error;
+                });
             }
             return window.__mdMathLoading;
         };

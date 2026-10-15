@@ -52,6 +52,7 @@ An invalid command should show an error without changing the saved source: $\not
 An unfinished inline expression remains source: $x_1 + x_2
 
 ## RTL
+
 משוואות Inline צריכות לעבוד גם ב-`RTL`: $f(x)=x^2$.
 
 ## Unfinished display block

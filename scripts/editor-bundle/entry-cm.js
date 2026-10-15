@@ -1692,7 +1692,7 @@ const anchoredPointerSelection = EditorView.mouseSelectionStyle.of((view, event)
 
 // A cursor exists at offset zero as soon as CodeMirror is created. Do not let
 // that implicit cursor put a leading code block into source mode. A fenced
-// block becomes active only after a pointer selection lands inside it.
+// block becomes active only after an explicit selection lands inside it.
 const activeCodeBlock = StateField.define({
   create: () => null,
   update(value, tr) {
@@ -1707,7 +1707,7 @@ const activeCodeBlock = StateField.define({
     if (!selection.empty) return null
 
     const head = selection.head
-    if (tr.isUserEvent("select.pointer")) return fencedCodeAt(tr.state, head)
+    if (tr.selection && tr.isUserEvent("select")) return fencedCodeAt(tr.state, head)
     // A fence authored from plain text has no prior active range. Resolve it
     // after input so its source stays editable as soon as the opening marker
     // becomes valid, including while a Mermaid block is being typed.
@@ -1724,7 +1724,8 @@ const activeCodeBlock = StateField.define({
 
 function collectMath(state) {
   const items = []
-  syntaxTree(state).iterate({ enter(node) {
+  const tree = ensureSyntaxTree(state, state.doc.length, 80) || syntaxTree(state)
+  tree.iterate({ enter(node) {
     if (["Table", "FencedCode", "CodeBlock", "InlineCode", "Frontmatter"].includes(node.name)) return false
     if (!["InlineMath", "DisplayMath", "MathBlock", "UnclosedMathBlock"].includes(node.name)) return
     const display = node.name !== "InlineMath"

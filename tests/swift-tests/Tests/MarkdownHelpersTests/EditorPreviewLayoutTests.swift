@@ -47,6 +47,35 @@ final class EditorPreviewLayoutTests: XCTestCase {
         XCTAssertEqual(saved as? String, source)
     }
 
+    func testKeyboardEntryRevealsFencedMathSource() async throws {
+        let source = "Before\n\n```math\nx^2\n```\n\nAfter"
+        let html = EditorHTML.render(markdown: source,
+            editorJavaScript: try TestVendor.script("md-preview/Vendor/CodeMirror/mdedit.min.js"))
+        let editor = WebViewLayoutHarness(html: html, width: 900, isEditor: true,
+            schemeHandlers: ["md-asset": EditorMathAssets()])
+        defer { editor.close() }
+        _ = try await editor.layout(texts: [], imageCount: 0, selectors: [".katex": 1])
+        let result = try await editor.webView.callAsyncJavaScript("""
+            window.__mdEditor.focus();
+            window.__mdEditor.select(7);
+            for (let i = 0; i < 2; i++) {
+                document.querySelector('.cm-content').dispatchEvent(new KeyboardEvent('keydown', {
+                    key: 'ArrowRight', code: 'ArrowRight', bubbles: true, cancelable: true
+                }));
+                window.__layoutTestFrame();
+            }
+            return {
+                rendered: !!document.querySelector('.math-display'),
+                sourceVisible: document.querySelector('.cm-content').textContent.includes('x^2'),
+                markdown: window.__mdEditor.getMarkdown()
+            };
+            """, arguments: [:], in: nil, contentWorld: .page)
+        let values = try XCTUnwrap(result as? [String: Any])
+        XCTAssertEqual(values["rendered"] as? Bool, false)
+        XCTAssertEqual(values["sourceVisible"] as? Bool, true)
+        XCTAssertEqual(values["markdown"] as? String, source)
+    }
+
     func testQuotedMathDoesNotAddEmptyDelimiterLines() async throws {
         for source in [">$$\n>equation\n>$$", "> $$\n> x^2\n> $$"] {
             let html = EditorHTML.render(markdown: source,
