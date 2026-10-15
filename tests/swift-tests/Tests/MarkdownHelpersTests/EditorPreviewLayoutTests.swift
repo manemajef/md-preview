@@ -34,6 +34,19 @@ final class EditorPreviewLayoutTests: XCTestCase {
         return "data:image/svg+xml;base64,\(Data(svg.utf8).base64EncodedString())"
     }
 
+    func testMathRendersWithSharedKaTeX() async throws {
+        let source = "Inline $x_1 + x_2$.\n\n$$\nE = mc^2\n$$\n\n```math\nx^2\n```"
+        let html = EditorHTML.render(markdown: source,
+            editorJavaScript: try TestVendor.script("md-preview/Vendor/CodeMirror/mdedit.min.js"))
+        let editor = WebViewLayoutHarness(html: html, width: 900, isEditor: true,
+            schemeHandlers: ["md-asset": EditorMathAssets()])
+        defer { editor.close() }
+        _ = try await editor.layout(texts: [], imageCount: 0,
+            selectors: [".katex": 3, ".katex-display": 2, ".katex-error": 0])
+        let saved = try await editor.webView.evaluateJavaScript("window.__mdEditor.getMarkdown()")
+        XCTAssertEqual(saved as? String, source)
+    }
+
     func testParagraphAndHeadingAlignment() async throws {
         try await check(Fixture(name: "paragraphs-headings", markdown: """
             # First heading
@@ -177,7 +190,8 @@ final class EditorPreviewLayoutTests: XCTestCase {
             let host = HostBridge()
             let reader = WebViewLayoutHarness(html: readerHTML, width: width, isEditor: false, zoom: zoom, height: fixture.height, messageHandler: host)
             let editor = WebViewLayoutHarness(html: editorHTML, width: initial == nil ? width : 1100,
-                                              isEditor: true, zoom: zoom, height: fixture.height, messageHandler: host)
+                                              isEditor: true, zoom: zoom, height: fixture.height, messageHandler: host,
+                                              schemeHandlers: ["md-asset": EditorMathAssets()])
             defer { reader.close(); editor.close() }
             var readLayout: WebViewLayoutHarness.Layout?
             var editLayout: WebViewLayoutHarness.Layout?

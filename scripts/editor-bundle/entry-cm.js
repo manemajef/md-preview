@@ -33,6 +33,8 @@ import { rust } from "@codemirror/legacy-modes/mode/rust"
 import { c, cpp, java, kotlin, objectiveC, csharp } from "@codemirror/legacy-modes/mode/clike"
 import { sql } from "@codemirror/legacy-modes/mode/sql"
 import { toml } from "@codemirror/legacy-modes/mode/toml"
+import { mathSyntax } from "./math.js"
+import { stexMath } from "@codemirror/legacy-modes/mode/stex"
 import { hcl } from "codemirror-lang-hcl"
 
 // ---------------------------------------------------------------------------
@@ -76,7 +78,10 @@ const legacy = (name, alias, parser) =>
     support: new LanguageSupport(StreamLanguage.define(parser)),
   })
 
+const texLanguage = StreamLanguage.define(stexMath)
+
 const codeLanguages = [
+  LanguageDescription.of({ name: "latex", alias: ["tex", "math"], support: new LanguageSupport(texLanguage) }),
   LanguageDescription.of({
     name: "javascript",
     alias: ["js", "jsx", "ts", "tsx", "typescript", "node"],
@@ -177,6 +182,30 @@ class TextWidget extends WidgetType {
     return span
   }
   ignoreEvent() { return false }
+}
+
+class MathWidget extends WidgetType {
+  constructor(source, display) { super(); this.source = source; this.display = display }
+  eq(other) { return this.source === other.source && this.display === other.display }
+  toDOM(view) {
+    const element = document.createElement(this.display ? "div" : "span")
+    element.className = this.display ? "math math-display" : "math math-inline"
+    element.textContent = this.source
+    element.setAttribute("aria-label", "Math formula. Click to edit source.")
+    element.addEventListener("mousedown", event => {
+      event.preventDefault()
+      const anchor = view.posAtDOM(element) + 1
+      view.focus()
+      view.dispatch({ selection: { anchor }, userEvent: "select.pointer" })
+    })
+    window.__mdLoadMath?.().then(() => {
+      if (!element.isConnected) return
+      window.__mdRenderMathElement(element, this.source, this.display)
+      view.requestMeasure()
+    }).catch(() => { /* Keep source visible if the bundled renderer is unavailable. */ })
+    return element
+  }
+  ignoreEvent() { return true }
 }
 
 class ImageWidget extends WidgetType {
@@ -602,7 +631,7 @@ let pendingTableContextAction = null
 
 // Inactive cells render inline formatting; focused cells expose their exact
 // Markdown. Build DOM nodes so authored HTML stays text and links stay editable.
-const tableInlineParser = markdownLanguage.parser.configure(obsidianHighlight)
+const tableInlineParser = markdownLanguage.parser.configure([obsidianHighlight, mathSyntax])
 const tableRenderedTextOffsets = new WeakMap()
 
 function renderTableCell(element, source) {
@@ -629,7 +658,17 @@ function renderTableCell(element, source) {
     appendText(parent, source.slice(offset, to), offset)
   }
   const appendNode = (parent, node) => {
-    if (node.name === 'InlineCode') {
+    if (node.name === 'InlineMath' || node.name === 'DisplayMath') {
+      const display = node.name === 'DisplayMath'
+      const size = display ? 2 : 1
+      const span = document.createElement('span')
+      const tex = source.slice(node.from + size, node.to - size)
+      appendText(span, source.slice(node.from, node.to), node.from)
+      parent.append(span)
+      window.__mdLoadMath?.().then(() => {
+        if (span.isConnected) window.__mdRenderMathElement(span, tex, display)
+      }).catch(() => {})
+    } else if (node.name === 'InlineCode') {
       const code = document.createElement('code')
       code.className = 'cm-md-inline-code'
       let text = source.slice(node.firstChild.to, node.lastChild.from).replace(/\n/g, ' ')
@@ -700,7 +739,7 @@ function captureTableSelection(view) {
   const state = EditorState.create({
     doc: text,
     selection: EditorSelection.single(target.anchor, target.head),
-    extensions: [markdown({ extensions: obsidianHighlight })],
+    extensions: [markdown({ extensions: [obsidianHighlight, mathSyntax] })],
   })
   tableFormattingCallbacks.get(view)?.(formattingState(state))
 }
@@ -1682,6 +1721,66 @@ const activeCodeBlock = StateField.define({
   },
 })
 
+function collectMath(state) {
+  const items = []
+  syntaxTree(state).iterate({ enter(node) {
+    if (["Table", "FencedCode", "CodeBlock", "InlineCode", "Frontmatter"].includes(node.name)) return false
+    if (!["InlineMath", "DisplayMath", "MathBlock", "UnclosedMathBlock"].includes(node.name)) return
+    const display = node.name !== "InlineMath"
+    const size = display ? 2 : 1
+    const closed = node.name !== "UnclosedMathBlock"
+    const lines = node.node.getChildren("MathLine")
+    items.push({ renderSource: lines.length ? lines.map(line => state.doc.sliceString(line.from, line.to)).join("\n") : null,
+      from: node.from, to: node.to, display, closed,
+      source: state.doc.sliceString(node.from + size, node.to - (closed ? size : 0)) })
+    return false
+  } })
+  return items
+}
+const setMathFocus = StateEffect.define()
+function decorateMath(state, items, focused) {
+  const selection = state.field(pointerPreview)?.selection ?? state.selection.main
+  const ranges = []
+  for (const item of items) {
+    const active = focused && selection.empty && selection.head >= item.from && selection.head <= item.to
+    if (item.closed && !active && !currentFindTouches(state, item.from, item.to)) {
+      ranges.push(Decoration.replace({ widget: new MathWidget(item.renderSource ?? item.source, item.display),
+        block: item.display && state.doc.lineAt(item.from).from === item.from
+          && state.doc.lineAt(item.to).to === item.to,
+      }).range(item.from, item.to))
+    } else {
+      highlightTree(texLanguage.parser.parse(item.source), codeHighlight, (from, to, classes) => {
+        ranges.push(Decoration.mark({ class: classes }).range(item.from + (item.display ? 2 : 1) + from,
+          item.from + (item.display ? 2 : 1) + to))
+      })
+    }
+  }
+  return { items, focused, decorations: Decoration.set(ranges, true) }
+}
+
+const mathPreviews = StateField.define({
+  create(state) {
+    const hasDollars = state.doc.toString().includes('$')
+    return { ...decorateMath(state, hasDollars ? collectMath(state) : [], false), hasDollars }
+  },
+  update(value, tr) {
+    // Plain documents pay no tree walk per keystroke. A newly typed/pasted
+    // dollar enables math immediately without reloading the editor page.
+    let hasDollars = value.hasDollars
+    if (!hasDollars && tr.docChanged) {
+      tr.changes.iterChanges((_a, _b, _c, _d, inserted) => {
+        if (inserted.toString().includes('$')) hasDollars = true
+      })
+    }
+    const items = hasDollars && (tr.docChanged || syntaxTree(tr.startState) !== syntaxTree(tr.state))
+      ? collectMath(tr.state) : value.items
+    if (items === value.items && !tr.selection && !tr.effects.length) return value
+    const focused = tr.effects.find(effect => effect.is(setMathFocus))?.value ?? value.focused
+    return { ...decorateMath(tr.state, items, focused), hasDollars }
+  },
+  provide: field => EditorView.decorations.from(field, value => value.decorations),
+})
+
 function buildMermaidPreviews(state) {
   const ranges = []
   const activeFence = state.field(activeCodeBlock)
@@ -1692,10 +1791,11 @@ function buildMermaidPreviews(state) {
       const details = fencedCodeDetails(state, node)
       const isActive = activeFence != null
         && node.from <= activeFence.from && node.to >= activeFence.to
-      if (details.language === "mermaid" && !isActive && !currentFindTouches(state, node.from, node.to)) {
+      if (["mermaid", "math"].includes(details.language)
+          && (details.language !== "math" || node.node.lastChild?.name === "CodeMark") && !isActive && !currentFindTouches(state, node.from, node.to)) {
         ranges.push(Decoration.replace({
           block: true,
-          widget: new MermaidWidget(details.source),
+          widget: details.language === "math" ? new MathWidget(details.source, true) : new MermaidWidget(details.source),
         }).range(node.from, node.to))
         return false
       }
@@ -1704,7 +1804,7 @@ function buildMermaidPreviews(state) {
   return Decoration.set(ranges, true)
 }
 
-// Mermaid previews replace entire fenced ranges, so they must be provided
+// Rendered math and Mermaid fences replace entire ranges, so they must be provided
 // directly from editor state rather than from a view plugin.
 const mermaidPreviews = StateField.define({
   create: (state) => buildMermaidPreviews(state),
@@ -1726,7 +1826,7 @@ const mermaidPreviews = StateField.define({
         if (fenceSyntaxChanged) return
         const removed = tr.startState.doc.sliceString(fromA, toA)
         const changedSource = removed + inserted.toString()
-        fenceSyntaxChanged = /[`~]|mermaid/i.test(changedSource)
+        fenceSyntaxChanged = /[`~]|mermaid|math/i.test(changedSource)
       })
     }
 
@@ -1951,6 +2051,8 @@ function buildDecorations(view, detectedCodeCache) {
             gapBeforeAdjacent(node)
           }
         }
+
+        if (["InlineMath", "DisplayMath", "MathBlock", "UnclosedMathBlock"].includes(name)) return false
 
         // --- Frontmatter ----------------------------------------------
         // Style the whole block as a quiet metadata card; keep the YAML
@@ -3013,7 +3115,7 @@ window.MDEditor = {
             content: markdown({
               base: markdownLanguage,
               codeLanguages,
-              extensions: obsidianHighlight,
+              extensions: [obsidianHighlight, mathSyntax],
             }),
           }),
           activeCodeBlock,
@@ -3022,6 +3124,8 @@ window.MDEditor = {
           stablePointerPreview,
           anchoredPointerSelection,
           mermaidPreviews,
+          mathPreviews,
+          EditorView.focusChangeEffect.of((_state, focused) => setMathFocus.of(focused)),
           tableEditors,
           tableFormattingSelection,
           // Markdown punctuation also carries processingInstruction tags.

@@ -78,6 +78,7 @@ nonisolated enum EditorHTML {
             height: 100%;
             box-sizing: border-box;
         }
+        \(MarkdownHTML.mathStylesheet)
         .cm-editor { height: 100%; outline: none; }
         .cm-editor.cm-focused { outline: none; }
         /* CodeMirror injects its base theme into <head> at runtime — after
@@ -667,6 +668,32 @@ nonisolated enum EditorHTML {
         }
         </script>
         """ : "")
+        <script>
+        \(MarkdownHTML.mathElementRenderer)
+        window.__mdRenderMathElement = renderMathElement;
+        // Loaded once, on the first rendered formula, including newly typed math.
+        window.__mdLoadMath = function () {
+            if (!window.__mdMathLoading) {
+                const css = document.createElement('link');
+                css.rel = 'stylesheet';
+                css.href = '\(MarkdownAssetScheme.vendorURL("katex.min.css"))';
+                const styleReady = new Promise((resolve, reject) => {
+                    css.onload = resolve;
+                    css.onerror = reject;
+                });
+                document.head.appendChild(css);
+                const script = document.createElement('script');
+                script.src = '\(MarkdownAssetScheme.vendorURL("katex.min.js"))';
+                const scriptReady = new Promise((resolve, reject) => {
+                    script.onload = resolve;
+                    script.onerror = reject;
+                });
+                document.head.appendChild(script);
+                window.__mdMathLoading = Promise.all([styleReady, scriptReady]);
+            }
+            return window.__mdMathLoading;
+        };
+        </script>
         <script>\(editorJavaScript)</script>
         <script>
         (function () {
