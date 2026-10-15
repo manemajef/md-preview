@@ -1387,13 +1387,14 @@ const METRICS = {
   line: 22.8,
   blankGap: 4,    // final blank of a run (.md-source-blank-line)
   paragraph: 12,  // p / ul / ol / pre / .md-code-wrap
+  math: 18.24, // .math-display (1.2em)
   quote: 18,      // blockquote
   alert: 24,      // .markdown-alert
   table: 24,      // .md-table-scroll
   hr: 12,         // hr (top only; the next block's margin supplies the bottom)
 }
 const SEPARATOR_BLOCKS = new Set([
-  "Paragraph", "FencedCode", "CodeBlock", "Blockquote",
+  "Paragraph", "MathBlock", "UnclosedMathBlock", "FencedCode", "CodeBlock", "Blockquote",
   "BulletList", "OrderedList", "Table", "HorizontalRule", "HTMLBlock",
 ])
 const separatorLineCache = new Map()
@@ -1781,6 +1782,28 @@ const mathPreviews = StateField.define({
   provide: field => EditorView.decorations.from(field, value => value.decorations),
 })
 
+// A block widget reports its opening source position for vertical movement.
+// Approaching from below must visit the intervening line / closing delimiter,
+// rather than reveal the block with the caret teleported to its opening.
+function moveUpIntoMath(view) {
+  const selection = view.state.selection.main
+  if (!selection.empty || view.state.selection.ranges.length !== 1 || view.compositionStarted) return false
+  const items = view.state.field(mathPreviews).items
+  if (!items.some(item => item.closed && item.display && item.to < selection.head)) return false
+  const next = view.moveVertically(selection, false)
+  const item = items.find(item => item.closed && item.display && item.to < selection.head
+    && next.head >= item.from && next.head <= item.to)
+  if (!item) return false
+  const current = view.state.doc.lineAt(selection.head)
+  if (current.number <= view.state.doc.lineAt(item.to).number) return false
+  const previous = view.state.doc.line(current.number - 1)
+  const anchor = previous.from > item.to
+    ? Math.min(previous.to, previous.from + selection.head - current.from)
+    : item.to
+  view.dispatch({ selection: { anchor }, scrollIntoView: true, userEvent: "select" })
+  return true
+}
+
 function buildMermaidPreviews(state) {
   const ranges = []
   const activeFence = state.field(activeCodeBlock)
@@ -1989,12 +2012,18 @@ function buildDecorations(view, detectedCodeCache) {
         return /^ {0,3}> ?\[!(note|tip|important|warning|caution)\]/i.test(firstLine.text)
           ? METRICS.alert : METRICS.quote
       }
+      case "MathBlock": return METRICS.math
+      case "Paragraph": {
+        const math = node.node.firstChild
+        return math?.name === "DisplayMath" && math.from === node.from && math.to === node.to
+          ? METRICS.math : METRICS.paragraph
+      }
       case "Table": return METRICS.table
       case "HorizontalRule": return METRICS.hr
       case "FencedCode":
         // Mermaid fences render as .mermaid-figure (same margin as tables).
-        return fencedCodeDetails(state, node).language === "mermaid"
-          ? METRICS.table : METRICS.paragraph
+        return { mermaid: METRICS.table, math: METRICS.math }[fencedCodeDetails(state, node).language]
+          ?? METRICS.paragraph
       default: return METRICS.paragraph
     }
   }
@@ -2052,7 +2081,11 @@ function buildDecorations(view, detectedCodeCache) {
           }
         }
 
-        if (["InlineMath", "DisplayMath", "MathBlock", "UnclosedMathBlock"].includes(name)) return false
+        if (["InlineMath", "DisplayMath", "MathBlock", "UnclosedMathBlock"].includes(name)) {
+          // Lezer skips leave() when enter() declines a subtree.
+          depth--
+          return false
+        }
 
         // --- Frontmatter ----------------------------------------------
         // Style the whole block as a quiet metadata card; keep the YAML
@@ -3143,6 +3176,7 @@ window.MDEditor = {
           // editor keeps them visible instead of joining lines.
           Prec.highest(keymap.of([{ key: "Enter", run: continueTaskList }])),
           keymap.of([
+            { key: "ArrowUp", run: moveUpIntoMath },
             { key: "Mod-b", run: toggleInlineMark("**") },
             { key: "Mod-i", run: toggleInlineMark("*") },
             { key: "Tab", run: indentMarkdownListItems, shift: indentLess },

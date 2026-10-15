@@ -47,6 +47,57 @@ final class EditorPreviewLayoutTests: XCTestCase {
         XCTAssertEqual(saved as? String, source)
     }
 
+    func testDisplayMathSpacingMatchesPreview() async throws {
+        for (name, formula) in [
+            ("single-line", "$$ x^2 $$"),
+            ("multiline", "$$\nx^2\n$$"),
+            ("fenced", "```math\nx^2\n```"),
+        ] {
+            try await check(Fixture(name: "math-spacing-\(name)",
+                markdown: "Before equation.\n\n\(formula)\n\nAfter equation.",
+                texts: ["Before equation.", "After equation."],
+                readSelectors: [".katex": 1], editorSelectors: [".katex": 1]))
+        }
+    }
+
+    func testArrowUpEntersPreviousMathAtItsClosingDelimiter() async throws {
+        let source = "$$\na\n$$\n\n$$\nb"
+        let html = EditorHTML.render(markdown: source,
+            editorJavaScript: try TestVendor.script("md-preview/Vendor/CodeMirror/mdedit.min.js"))
+        let editor = WebViewLayoutHarness(html: html, width: 900, isEditor: true,
+            schemeHandlers: ["md-asset": EditorMathAssets()])
+        defer { editor.close() }
+        _ = try await editor.layout(texts: [], imageCount: 0, selectors: [".katex": 1])
+        let result = try await editor.webView.callAsyncJavaScript("""
+            const settle = async () => {
+                for (let i = 0; i < 3; i++) {
+                    window.__layoutTestFrame();
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                }
+            };
+            window.__mdEditor.focus();
+            window.__mdEditor.select(source.length);
+            await settle();
+            const lines = [];
+            for (let i = 0; i < 3; i++) {
+                document.querySelector('.cm-content').dispatchEvent(new KeyboardEvent('keydown', {
+                    key: 'ArrowUp', code: 'ArrowUp', bubbles: true, cancelable: true
+                }));
+                await settle();
+                const selection = window.getSelection();
+                lines.push(window.__mdEditor.getLinkSelection(false).from);
+            }
+            window.__mdEditor.exec('bold');
+            return { markdown: window.__mdEditor.getMarkdown(), lines };
+            """, arguments: ["source": source], in: nil, contentWorld: .page)
+        let values = try XCTUnwrap(result as? [String: Any])
+        let markdown = try XCTUnwrap(values["markdown"] as? String)
+        let inserted = try XCTUnwrap(markdown.range(of: "****"))
+        let offset = markdown.distance(from: markdown.startIndex, to: inserted.lowerBound)
+        XCTAssertEqual(values["lines"] as? [Int], [10, 8, 7])
+        XCTAssertTrue((5...7).contains(offset), "Caret landed at \(offset), lines: \(values["lines"] ?? "missing")")
+    }
+
     func testParagraphAndHeadingAlignment() async throws {
         try await check(Fixture(name: "paragraphs-headings", markdown: """
             # First heading

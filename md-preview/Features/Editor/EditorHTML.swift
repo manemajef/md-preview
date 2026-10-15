@@ -79,6 +79,8 @@ nonisolated enum EditorHTML {
             box-sizing: border-box;
         }
         \(MarkdownHTML.mathStylesheet)
+        /* Source separator lines own block spacing in CodeMirror. */
+        #editor .math-display { margin-top: 0; }
         .cm-editor { height: 100%; outline: none; }
         .cm-editor.cm-focused { outline: none; }
         /* CodeMirror injects its base theme into <head> at runtime — after
@@ -744,6 +746,7 @@ nonisolated enum EditorHTML {
                             line: \(MarkdownHTML.sourceLineHeight),
                             blankGap: \(MarkdownHTML.blankLineGap),
                             paragraph: \(MarkdownHTML.paragraphSpacing),
+                            math: \(MarkdownHTML.bodyFontSize * 1.2),
                             quote: \(MarkdownHTML.quoteSpacing),
                             alert: \(MarkdownHTML.largeBlockSpacing),
                             table: \(MarkdownHTML.largeBlockSpacing),
