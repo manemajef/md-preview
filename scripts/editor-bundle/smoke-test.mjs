@@ -1344,4 +1344,20 @@ for (const [label, source, position, expected, caret] of [
   host.remove()
 }
 
+// Native text input can deliver a newline without invoking the Enter keymap.
+// Type each dollar separately so this also exercises incremental parsing.
+for (const initial of ['', 'Paragraph\n\n']) {
+  const host = document.createElement('div')
+  document.body.append(host)
+  const editor = window.MDEditor.create(host, initial, {})
+  editor.select(initial.length)
+  editor.insert('$')
+  editor.insert('$')
+  editor.insert('\n')
+  check('native newline completes newly typed math', editor.getMarkdown() === initial + '$$\n\n$$'
+    && editor.getLinkSelection(false).from === initial.length + 3)
+  editor.destroy()
+  host.remove()
+}
+
 process.exit(failures ? 1 : 0)
