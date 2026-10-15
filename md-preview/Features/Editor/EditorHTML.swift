@@ -81,6 +81,13 @@ nonisolated enum EditorHTML {
         \(MarkdownHTML.mathStylesheet)
         /* Source separator lines own block spacing in CodeMirror. */
         #editor .math-display { margin-top: 0; }
+        /* Nested math shares a CodeMirror line with the hidden quote/list
+           prefix. A block-level div would add empty line boxes around it. */
+        #editor .cm-line .math-display {
+            display: inline-block;
+            width: 100%;
+            vertical-align: top;
+        }
         .cm-editor { height: 100%; outline: none; }
         .cm-editor.cm-focused { outline: none; }
         /* CodeMirror injects its base theme into <head> at runtime — after

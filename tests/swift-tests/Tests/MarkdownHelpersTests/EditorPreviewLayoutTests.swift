@@ -47,6 +47,29 @@ final class EditorPreviewLayoutTests: XCTestCase {
         XCTAssertEqual(saved as? String, source)
     }
 
+    func testQuotedMathDoesNotAddEmptyDelimiterLines() async throws {
+        for source in [">$$\n>equation\n>$$", "> $$\n> x^2\n> $$"] {
+            let html = EditorHTML.render(markdown: source,
+                editorJavaScript: try TestVendor.script("md-preview/Vendor/CodeMirror/mdedit.min.js"))
+            let editor = WebViewLayoutHarness(html: html, width: 900, isEditor: true,
+                schemeHandlers: ["md-asset": EditorMathAssets()])
+            defer { editor.close() }
+            _ = try await editor.layout(texts: [], imageCount: 0, selectors: [".katex": 1])
+            let extraHeight = try await editor.webView.evaluateJavaScript("""
+                (() => {
+                    const math = document.querySelector('.math-display');
+                    const line = math.closest('.cm-line');
+                    const style = getComputedStyle(line);
+                    return line.getBoundingClientRect().height - math.getBoundingClientRect().height
+                        - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+                })()
+                """)
+            XCTAssertEqual(try XCTUnwrap(extraHeight as? Double), 0, accuracy: 1, source)
+            let saved = try await editor.webView.evaluateJavaScript("window.__mdEditor.getMarkdown()")
+            XCTAssertEqual(saved as? String, source)
+        }
+    }
+
     func testDisplayMathSpacingMatchesPreview() async throws {
         for (name, formula) in [
             ("single-line", "$$ x^2 $$"),
