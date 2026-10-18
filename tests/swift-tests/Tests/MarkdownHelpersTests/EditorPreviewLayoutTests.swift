@@ -84,6 +84,7 @@ final class EditorPreviewLayoutTests: XCTestCase {
                     cards: document.querySelectorAll('.cm-md-code-card').length,
                     language: card?.querySelector('.cm-md-code-language-input')?.value || '',
                     actions: card?.querySelectorAll('.cm-md-code-action').length,
+                    rows: card?.querySelectorAll('.cm-line').length,
                     delimiters: delimiters.map(node => node.textContent).join(''),
                     visible: delimiters.every(node => getComputedStyle(node).visibility === 'visible'),
                     scrolls: card && card.scrollWidth > card.clientWidth,
@@ -96,7 +97,8 @@ final class EditorPreviewLayoutTests: XCTestCase {
             let values = try XCTUnwrap(result as? [String: Any])
             XCTAssertEqual(values["cards"] as? Int, 1, formula)
             XCTAssertEqual(values["language"] as? String, fenced ? "math" : "", formula)
-            XCTAssertEqual(values["actions"] as? Int, 2, formula)
+            XCTAssertEqual(values["actions"] as? Int, fenced ? 2 : 0, formula)
+            XCTAssertEqual(values["rows"] as? Int, fenced ? 1 : formula.components(separatedBy: "\n").count, formula)
             if !fenced {
                 XCTAssertEqual(values["delimiters"] as? String, "$$$$", formula)
                 XCTAssertEqual(values["visible"] as? Bool, true, formula)
@@ -105,17 +107,19 @@ final class EditorPreviewLayoutTests: XCTestCase {
             XCTAssertEqual(values["radius"] as? String, "16px", formula)
             XCTAssertEqual(values["rendered"] as? Bool, false, formula)
             XCTAssertEqual(values["markdown"] as? String, source)
-            let wrapped = try await editor.webView.callAsyncJavaScript("""
-                document.querySelector('.cm-md-code-toggle-wrap').click();
-                for (let i = 0; i < 4; i++) {
-                    window.__layoutTestFrame();
-                    await new Promise(resolve => setTimeout(resolve, 10));
-                }
-                const card = document.querySelector('.cm-md-code-card-wrapped');
-                return !!card && card.scrollWidth <= card.clientWidth
-                    && window.__mdEditor.getMarkdown() === source;
-                """, arguments: ["source": source], in: nil, contentWorld: .page)
-            XCTAssertEqual(wrapped as? Bool, true, formula)
+            if fenced {
+                let wrapped = try await editor.webView.callAsyncJavaScript("""
+                    document.querySelector('.cm-md-code-toggle-wrap').click();
+                    for (let i = 0; i < 4; i++) {
+                        window.__layoutTestFrame();
+                        await new Promise(resolve => setTimeout(resolve, 10));
+                    }
+                    const card = document.querySelector('.cm-md-code-card-wrapped');
+                    return !!card && card.scrollWidth <= card.clientWidth
+                        && window.__mdEditor.getMarkdown() === source;
+                    """, arguments: ["source": source], in: nil, contentWorld: .page)
+                XCTAssertEqual(wrapped as? Bool, true, formula)
+            }
             _ = try await editor.webView.evaluateJavaScript("window.__mdEditor.select(\(source.count))")
             _ = try await editor.layout(texts: [], imageCount: 0,
                 selectors: [".katex": 1, ".cm-md-code-card": 0])
@@ -145,13 +149,17 @@ final class EditorPreviewLayoutTests: XCTestCase {
                 document.execCommand('insertText', false, character);
                 await settle();
             }
+            const unpaired = window.__mdEditor.getMarkdown();
+            document.execCommand('insertParagraph', false);
+            await settle();
             const paired = window.__mdEditor.getMarkdown();
             const caret = window.__mdEditor.getLinkSelection(false).from;
             document.execCommand('insertText', false, 'x');
             await settle();
-            return { paired, caret, markdown: window.__mdEditor.getMarkdown() };
+            return { unpaired, paired, caret, markdown: window.__mdEditor.getMarkdown() };
             """, arguments: [:], in: nil, contentWorld: .page)
         let values = try XCTUnwrap(result as? [String: Any])
+        XCTAssertEqual(values["unpaired"] as? String, "$$")
         XCTAssertEqual(values["paired"] as? String, "$$\n\n$$")
         XCTAssertEqual(values["caret"] as? Int, 3)
         XCTAssertEqual(values["markdown"] as? String, "$$\nx\n$$")

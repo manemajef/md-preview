@@ -1433,8 +1433,7 @@ for (const [label, formula, card] of [
   const host = document.createElement('div')
   document.body.append(host)
   const source = formula + '\n\nAfter'
-  let copied = null
-  const editor = window.MDEditor.create(host, source, { onCopyCode: text => { copied = text } })
+  const editor = window.MDEditor.create(host, source, {})
   editor.focus()
   editor.select(source.indexOf('frac') + 2)
   await new Promise(resolve => setTimeout(resolve, 20))
@@ -1442,18 +1441,7 @@ for (const [label, formula, card] of [
   check(`${label}: no language picker for dollar math`, !host.querySelector('.cm-md-code-language-input'))
   if (card) check(`${label}: both delimiters stay visible`,
     [...host.querySelectorAll('.cm-md-fence-info')].map(node => node.textContent).join('') === '$$$$')
-  if (card) {
-    host.querySelector('.cm-md-code-copy').click()
-    await Promise.resolve()
-    check(`${label}: shared copy button copies LaTeX without markers`, copied?.includes('\\frac{1}{x}')
-      && !copied.includes('$$') && !copied.includes('>'))
-    host.querySelector('.cm-md-code-toggle-wrap').click()
-    check(`${label}: shared wrap button wraps the card`, !!host.querySelector('.cm-md-code-card-wrapped')
-      && host.querySelector('.cm-md-code-toggle-wrap').getAttribute('aria-pressed') === 'true')
-    host.querySelector('.cm-md-code-toggle-wrap').click()
-    check(`${label}: unwrapping preserves source`, !host.querySelector('.cm-md-code-card-wrapped')
-      && editor.getMarkdown() === source)
-  }
+  check(`${label}: dollar source has no toolbar`, !host.querySelector('.cm-md-code-action'))
   const closing = source.lastIndexOf('$$')
   if (card) {
     editor.insertTextAt('', closing, closing + 2)
@@ -1475,16 +1463,20 @@ for (const [label, formula, card] of [
 for (const [label, initial, position, expected] of [
   ['empty document', '', 0, '$$\n\n$$'],
   ['after prose', 'Intro\n\n', 7, 'Intro\n\n$$\n\n$$'],
-  ['existing closer', '\nx\n$$', 0, '$$\nx\n$$'],
-  ['closing an existing block', '$$\nx\n', 5, '$$\nx\n$$'],
-  ['inside code', '```text\n\n```', 8, '```text\n$$\n```'],
-  ['inside prose', 'Text ', 5, 'Text $$'],
+  ['existing closer', '\nx\n$$', 0, '$$\n\nx\n$$'],
+  ['closing an existing block', '$$\nx\n', 5, '$$\nx\n$$\n'],
+  ['inside code', '```text\n\n```', 8, '```text\n$$\n\n```'],
+  ['inside prose', 'Text ', 5, 'Text $$\n'],
 ]) {
   const host = document.createElement('div')
   document.body.append(host)
   const editor = window.MDEditor.create(host, initial, {})
   editor.select(position)
   for (const character of '$$') editor.insert(character)
+  check(`typing dollars does not expand: ${label}`, editor.getMarkdown() === initial.slice(0, position) + '$$' + initial.slice(position))
+  host.querySelector('.cm-content').dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+    key: 'Enter', code: 'Enter', bubbles: true, cancelable: true,
+  }))
   check(`dollar completion: ${label}`, editor.getMarkdown() === expected)
   if (label === 'empty document') {
     editor.insert('x')
@@ -1496,11 +1488,19 @@ for (const [label, initial, position, expected] of [
     host.querySelector('.cm-content').dispatchEvent(new dom.window.KeyboardEvent('keydown', {
       key: 'z', code: 'KeyZ', ctrlKey: true, bubbles: true, cancelable: true,
     }))
-    check('undoing dollar completion leaves no orphan closer', editor.getMarkdown() === '$')
+    check('undoing dollar completion leaves no orphan closer', editor.getMarkdown() === '$$')
   }
   editor.destroy()
   host.remove()
 }
+
+const singleMathHost = document.createElement('div')
+document.body.append(singleMathHost)
+const singleMath = window.MDEditor.create(singleMathHost, '', {})
+for (const character of '$$ equation $$') singleMath.insert(character)
+check('typing a complete single-line formula preserves its layout', singleMath.getMarkdown() === '$$ equation $$')
+singleMath.destroy()
+singleMathHost.remove()
 
 // Exercise the production loader without requiring a network or duplicating it.
 const editorSwift = readFileSync(new URL('../../md-preview/Features/Editor/EditorHTML.swift', import.meta.url), 'utf8')

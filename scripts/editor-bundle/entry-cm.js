@@ -459,7 +459,6 @@ class CodeLanguageWidget extends WidgetType {
       && other.detectedLanguage === this.detectedLanguage
       && other.wrapped === this.wrapped
       && other.plain === this.plain
-      && other.math === this.math
   }
 
   toDOM(view) {
@@ -467,66 +466,61 @@ class CodeLanguageWidget extends WidgetType {
     container.className = "cm-md-code-language"
     container.contentEditable = "false"
 
-    if (!this.math) {
-      const input = document.createElement("input")
-      input.type = "text"
-      input.className = "cm-md-code-language-input"
-      input.autocomplete = "off"
-      input.spellcheck = false
-      input.value = this.language
-      input.readOnly = !!this.plain
-      input.placeholder = "language"
-      input.setAttribute("aria-label", "Code block language")
-      input.dataset.fenceFrom = String(this.fenceFrom)
+    const input = document.createElement("input")
+    input.type = "text"
+    input.className = "cm-md-code-language-input"
+    input.autocomplete = "off"
+    input.spellcheck = false
+    input.value = this.language
+    input.readOnly = !!this.plain
+    input.placeholder = "language"
+    input.setAttribute("aria-label", "Code block language")
+    input.dataset.fenceFrom = String(this.fenceFrom)
 
-      const metadata = this.rawInfo.match(/^\S+([\s\S]*)$/)?.[1] || ""
-      const initialDisplayValue = input.value
-      let commitOnBlur = true
-      let dispatchingCommit = false
-      const commit = () => {
-        if (this.plain) return
-        const language = input.value.trim().split(/\s+/, 1)[0].toLowerCase()
-        const nextInfo = language
-          ? language + metadata
-          : ""
-        if (nextInfo === this.rawInfo) return
-        if (input.value === initialDisplayValue) return
-        dispatchingCommit = true
-        view.dispatch({
-          changes: { from: this.infoFrom, to: this.infoTo, insert: nextInfo },
-          userEvent: "input",
-        })
-      }
-
-      input.addEventListener("change", commit)
-      input.addEventListener("keydown", (event) => {
-        event.stopPropagation()
-        if (event.key === "Enter") {
-          event.preventDefault()
-          commit()
-          input.blur()
-          view.focus()
-        } else if (event.key === "Escape") {
-          event.preventDefault()
-          commitOnBlur = false
-          input.value = this.language
-          input.blur()
-          view.focus()
-        }
+    const metadata = this.rawInfo.match(/^\S+([\s\S]*)$/)?.[1] || ""
+    const initialDisplayValue = input.value
+    let commitOnBlur = true
+    let dispatchingCommit = false
+    const commit = () => {
+      if (this.plain) return
+      const language = input.value.trim().split(/\s+/, 1)[0].toLowerCase()
+      const nextInfo = language
+        ? language + metadata
+        : ""
+      if (nextInfo === this.rawInfo) return
+      if (input.value === initialDisplayValue) return
+      dispatchingCommit = true
+      view.dispatch({
+        changes: { from: this.infoFrom, to: this.infoTo, insert: nextInfo },
+        userEvent: "input",
       })
-      input.addEventListener("mousedown", (event) => event.stopPropagation())
-      input.addEventListener("click", (event) => event.stopPropagation())
-      input.addEventListener("blur", () => {
-        if (commitOnBlur && !dispatchingCommit) commit()
-        dispatchingCommit = false
-        commitOnBlur = true
-      })
-
-      container.appendChild(input)
-    } else {
-      container.style.justifyContent = 'flex-end'
-      container.style.width = 'calc(100cqw - 19px - var(--cm-md-code-nest, 0px))'
     }
+
+    input.addEventListener("change", commit)
+    input.addEventListener("keydown", (event) => {
+      event.stopPropagation()
+      if (event.key === "Enter") {
+        event.preventDefault()
+        commit()
+        input.blur()
+        view.focus()
+      } else if (event.key === "Escape") {
+        event.preventDefault()
+        commitOnBlur = false
+        input.value = this.language
+        input.blur()
+        view.focus()
+      }
+    })
+    input.addEventListener("mousedown", (event) => event.stopPropagation())
+    input.addEventListener("click", (event) => event.stopPropagation())
+    input.addEventListener("blur", () => {
+      if (commitOnBlur && !dispatchingCommit) commit()
+      dispatchingCommit = false
+      commitOnBlur = true
+    })
+
+    container.appendChild(input)
     const action = (label, icon, className, run) => {
       const button = document.createElement('button')
       button.type = 'button'
@@ -545,20 +539,13 @@ class CodeLanguageWidget extends WidgetType {
       }))
     toggle.setAttribute('aria-pressed', String(this.wrapped))
     action('Copy code', 'copy', 'cm-md-code-copy', async button => {
-      let source
-      if (this.math) {
-        const item = view.state.field(mathPreviews).items.find(item => item.from === this.fenceFrom)
-        if (!item) return
-        source = item.renderSource ?? item.source
-      } else {
-        const line = view.state.doc.lineAt(this.fenceFrom)
-        let node = syntaxTree(view.state).resolve(this.plain ? line.to : this.fenceFrom + 1, -1)
-        while (node && node.name !== (this.plain ? 'CodeBlock' : 'FencedCode')) node = node.parent
-        if (!node) return
-        source = this.plain
-          ? node.getChildren('CodeText').map(text => view.state.sliceDoc(text.from, text.to)).join('')
-          : fencedCodeDetails(view.state, node).source
-      }
+      const line = view.state.doc.lineAt(this.fenceFrom)
+      let node = syntaxTree(view.state).resolve(this.plain ? line.to : this.fenceFrom + 1, -1)
+      while (node && node.name !== (this.plain ? 'CodeBlock' : 'FencedCode')) node = node.parent
+      if (!node) return
+      const source = this.plain
+        ? node.getChildren('CodeText').map(text => view.state.sliceDoc(text.from, text.to)).join('')
+        : fencedCodeDetails(view.state, node).source
       try {
         const handler = codeCopyHandlers.get(view)
         if (handler) handler(source)
@@ -2355,17 +2342,10 @@ function buildDecorations(view, detectedCodeCache) {
           if (standalone && (editing || currentFindTouches(state, node.from, node.to))) {
             const first = state.doc.lineAt(node.from)
             const last = state.doc.lineAt(node.to)
-            const wrapped = state.field(wrappedCodeBlocks).has(first.from)
-            ranges.push(Decoration.widget({ widget: new CodeLanguageWidget({
-              fenceFrom: node.from, math: true, rawInfo: '', wrapped,
-            }), side: -1 }).range(first.from))
             const group = Decoration.line({ attributes: {
               'data-code-scroll-group': String(first.from),
-              class: wrapped ? 'cm-md-code-wrapped' : '',
               // Include quote/list indentation in the card's measured width.
-              style: 'box-sizing:border-box;--cm-md-code-nest:' + (quoteStack.length
-                ? `${quoteStack.length * 1.5}em`
-                : listTextIndent(listStack.length, listExtraDigits.reduce((sum, extra) => sum + extra, 0))),
+              style: 'box-sizing:border-box',
             } })
             for (let number = first.number; number <= last.number; number++) {
               const line = state.doc.line(number)
@@ -3351,10 +3331,33 @@ const autoCloseFence = EditorState.transactionFilter.of((tr) => {
   const selection = tr.newSelection.main
   if (!selection.empty) return tr
 
+  // Pair dollar math on Enter, leaving single-line expressions uninterrupted.
+  const before = tr.startState.selection
+  const opening = tr.startState.doc.lineAt(before.main.head)
+  if (before.ranges.length === 1 && before.main.empty && before.main.head === opening.to
+      && opening.text === '$$' && !tr.isUserEvent('input.paste')) {
+    let newline = false
+    tr.changes.iterChanges((from, to, _fromB, _toB, inserted) => {
+      newline = from === opening.to && to === from && inserted.toString() === '\n'
+    })
+    if (newline) {
+      const tree = ensureSyntaxTree(tr.startState, opening.to, 80) || syntaxTree(tr.startState)
+      let node = tree.resolve(opening.to, -1)
+      while (node && !['MathBlock', 'UnclosedMathBlock', 'FencedCode', 'CodeBlock'].includes(node.name)) node = node.parent
+      if (node?.name === 'UnclosedMathBlock' && node.from === opening.from) return [tr, {
+        changes: { from: selection.head, insert: '\n$$' },
+        selection: { anchor: selection.head },
+        annotations: autoClosedFence.of(true),
+        sequential: true,
+      }]
+    }
+  }
+
   const line = tr.newDoc.lineAt(selection.head)
   const offset = selection.head - line.from
-  const delimiter = line.text.slice(0, offset)
-  if (!["```", "$$"].includes(delimiter) || line.text.slice(offset) !== "") return tr
+  if (line.text.slice(0, offset) !== "```" || line.text.slice(offset) !== "") {
+    return tr
+  }
 
   let openedOnThisLine = false
   let openingOldPos = null
@@ -3364,12 +3367,12 @@ const autoCloseFence = EditorState.transactionFilter.of((tr) => {
     const oldPrefix = oldLine.text.slice(0, fromA - oldLine.from)
     const oldSuffix = oldLine.text.slice(toA - oldLine.from)
     const insertedText = inserted.toString()
-    const completesFence = (oldPrefix === "" && insertedText === delimiter)
-      || (oldPrefix === delimiter.slice(0, -1) && insertedText === delimiter.slice(-1))
+    const completesFence = (oldPrefix === "" && insertedText === "```")
+      || (oldPrefix === "``" && insertedText === "`")
     openedOnThisLine = oldSuffix === ""
       && completesFence
-      && fromB <= line.from + delimiter.length - 1
-      && toB >= line.from + delimiter.length
+      && fromB <= line.from + 2
+      && toB >= line.from + 3
     if (openedOnThisLine) openingOldPos = fromA
   })
   if (!openedOnThisLine) return tr
@@ -3377,17 +3380,11 @@ const autoCloseFence = EditorState.transactionFilter.of((tr) => {
   const oldLine = tr.startState.doc.lineAt(openingOldPos)
   const existingFenceStart = fenceStartAt(tr.startState, openingOldPos)
   if (existingFenceStart != null && existingFenceStart < oldLine.from) return tr
-  if (delimiter === '$$') {
-    const tree = ensureSyntaxTree(tr.state, selection.head, 80) || syntaxTree(tr.state)
-    let node = tree.resolve(selection.head, -1)
-    while (node && !['MathBlock', 'UnclosedMathBlock', 'FencedCode', 'CodeBlock'].includes(node.name)) node = node.parent
-    if (node?.name !== 'UnclosedMathBlock' || node.from !== line.from) return tr
-  }
 
   return [
     tr,
     {
-      changes: { from: selection.head, insert: `\n\n${delimiter}` },
+      changes: { from: selection.head, insert: "\n\n```" },
       selection: { anchor: selection.head + 1 },
       annotations: autoClosedFence.of(true),
       sequential: true,
