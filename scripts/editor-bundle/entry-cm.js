@@ -2333,6 +2333,31 @@ function buildDecorations(view, detectedCodeCache) {
         }
 
         if (["InlineMath", "DisplayMath", "MathBlock", "UnclosedMathBlock"].includes(name)) {
+          const paragraph = node.node.parent
+          const standalone = name === "MathBlock" || (name === "DisplayMath"
+            && paragraph?.name === "Paragraph" && paragraph.from === node.from && paragraph.to === node.to)
+          const editing = sourceCaret != null && sourceCaret >= node.from && sourceCaret <= node.to
+          if (standalone && (editing || currentFindTouches(state, node.from, node.to))) {
+            const first = state.doc.lineAt(node.from)
+            const last = state.doc.lineAt(node.to)
+            const group = Decoration.line({ attributes: {
+              'data-code-scroll-group': String(first.from),
+              // Include quote/list indentation in the card's measured width.
+              style: 'box-sizing:border-box',
+            } })
+            for (let number = first.number; number <= last.number; number++) {
+              const line = state.doc.line(number)
+              if (number === first.number) lineOnce(line.from, codeLineFirst)
+              if (number === last.number) lineOnce(line.from, codeLineLast)
+              if (number !== first.number && number !== last.number) lineOnce(line.from, codeLine)
+              ranges.push(group.range(line.from))
+              if (line.length) ranges.push(codeScrollText.range(line.from, line.to))
+            }
+            // The real delimiters identify dollar math without a language picker.
+            ranges.push(fenceMark.range(node.from, node.from + 2))
+            const closing = last.from + last.text.lastIndexOf('$$')
+            ranges.push(fenceMark.range(closing, closing + 2))
+          }
           // Lezer skips leave() when enter() declines a subtree.
           depth--
           return false

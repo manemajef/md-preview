@@ -47,6 +47,68 @@ final class EditorPreviewLayoutTests: XCTestCase {
         XCTAssertEqual(saved as? String, source)
     }
 
+    func testMathSourceUsesTheSharedCodeCard() async throws {
+        for (formula, fenced, scrolls) in [
+            ("$$\n\\frac{1}{x}\n$$", false, false),
+            ("$$ \\frac{1}{x} $$", false, false),
+            ("> $$\n> \\frac{1}{x}\n> $$", false, false),
+            ("- $$\n  \\frac{1}{x}\n  $$", false, false),
+            ("$$\n\\frac{1}{" + String(repeating: "x", count: 240) + "}\n$$", false, true),
+            ("```math\n\\frac{1}{x}\n```", true, false),
+        ] {
+            let source = "Before\n\n" + formula + "\n\nAfter"
+            let html = EditorHTML.render(markdown: source,
+                editorJavaScript: try TestVendor.script("md-preview/Vendor/CodeMirror/mdedit.min.js"))
+            let editor = WebViewLayoutHarness(html: html, width: 500, isEditor: true,
+                schemeHandlers: ["md-asset": EditorMathAssets()])
+            let window = NSWindow(contentRect: editor.webView.frame, styleMask: .borderless,
+                                  backing: .buffered, defer: false)
+            window.contentView = editor.webView
+            defer {
+                editor.close()
+                window.contentView = nil
+            }
+            _ = try await editor.layout(texts: [], imageCount: 0, selectors: [".katex": 1])
+            let result = try await editor.webView.callAsyncJavaScript("""
+                // Supply focus for the hidden host, as in the marker-editing tests.
+                document.hasFocus = () => true;
+                window.__mdEditor.focus();
+                window.__mdEditor.select(source.indexOf('frac') + 2);
+                for (let i = 0; i < 4; i++) {
+                    window.__layoutTestFrame();
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                }
+                const card = document.querySelector('.cm-md-code-card');
+                const delimiters = [...document.querySelectorAll('.cm-md-fence-info')];
+                return {
+                    cards: document.querySelectorAll('.cm-md-code-card').length,
+                    language: card?.querySelector('.cm-md-code-language-input')?.value || '',
+                    delimiters: delimiters.map(node => node.textContent).join(''),
+                    visible: delimiters.every(node => getComputedStyle(node).visibility === 'visible'),
+                    scrolls: card && card.scrollWidth > card.clientWidth,
+                    widths: card && [card.scrollWidth, card.clientWidth],
+                    radius: card && getComputedStyle(card).borderRadius,
+                    rendered: !!document.querySelector('.math-display'),
+                    markdown: window.__mdEditor.getMarkdown()
+                };
+                """, arguments: ["source": source], in: nil, contentWorld: .page)
+            let values = try XCTUnwrap(result as? [String: Any])
+            XCTAssertEqual(values["cards"] as? Int, 1, formula)
+            XCTAssertEqual(values["language"] as? String, fenced ? "math" : "", formula)
+            if !fenced {
+                XCTAssertEqual(values["delimiters"] as? String, "$$$$", formula)
+                XCTAssertEqual(values["visible"] as? Bool, true, formula)
+            }
+            XCTAssertEqual(values["scrolls"] as? Bool, scrolls, "\(formula) widths: \(values["widths"] ?? "missing")")
+            XCTAssertEqual(values["radius"] as? String, "16px", formula)
+            XCTAssertEqual(values["rendered"] as? Bool, false, formula)
+            XCTAssertEqual(values["markdown"] as? String, source)
+            _ = try await editor.webView.evaluateJavaScript("window.__mdEditor.select(\(source.count))")
+            _ = try await editor.layout(texts: [], imageCount: 0,
+                selectors: [".katex": 1, ".cm-md-code-card": 0])
+        }
+    }
+
     func testKeyboardEntryRevealsFencedMathSource() async throws {
         let source = "Before\n\n```math\nx^2\n```\n\nAfter"
         let html = EditorHTML.render(markdown: source,

@@ -1422,6 +1422,43 @@ typedMath.destroy()
 typedMathHost.remove()
 
 
+for (const [label, formula, card] of [
+  ['multiline dollars', '$$\n\\frac{1}{x}\n$$', true],
+  ['single-line dollars', '$$ \\frac{1}{x} $$', true],
+  ['quoted dollars', '> $$\n> \\frac{1}{x}\n> $$', true],
+  ['listed dollars', '- $$\n  \\frac{1}{x}\n  $$', true],
+  ['inline math', 'Inline $\\frac{1}{x}$ text.', false],
+  ['display math within prose', 'Before $$ \\frac{1}{x} $$ after.', false],
+]) {
+  const host = document.createElement('div')
+  document.body.append(host)
+  const source = formula + '\n\nAfter'
+  const editor = window.MDEditor.create(host, source, {})
+  editor.focus()
+  editor.select(source.indexOf('frac') + 2)
+  await new Promise(resolve => setTimeout(resolve, 20))
+  check(`${label}: source uses the expected card`, !!host.querySelector('.cm-md-code-card') === card)
+  check(`${label}: no language picker for dollar math`, !host.querySelector('.cm-md-code-language'))
+  if (card) check(`${label}: both delimiters stay visible`,
+    [...host.querySelectorAll('.cm-md-fence-info')].map(node => node.textContent).join('') === '$$$$')
+  const closing = source.lastIndexOf('$$')
+  if (card) {
+    editor.insertTextAt('', closing, closing + 2)
+    check(`${label}: deleting the closer leaves editable source`, !host.querySelector('.math')
+      && editor.getMarkdown() === source.slice(0, closing) + source.slice(closing + 2))
+    host.querySelector('.cm-content').dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+      key: 'z', code: 'KeyZ', ctrlKey: true, bubbles: true, cancelable: true,
+    }))
+    check(`${label}: undo restores exact delimiters`, editor.getMarkdown() === source)
+  }
+  editor.select(source.length)
+  await new Promise(resolve => setTimeout(resolve, 10))
+  check(`${label}: leaving source restores only the equation`, !!host.querySelector('.katex')
+    && !host.querySelector('.cm-md-code-card') && editor.getMarkdown() === source)
+  editor.destroy()
+  host.remove()
+}
+
 // Exercise the production loader without requiring a network or duplicating it.
 const editorSwift = readFileSync(new URL('../../md-preview/Features/Editor/EditorHTML.swift', import.meta.url), 'utf8')
 const mathLoader = editorSwift.match(/window.__mdLoadMath = function \(\) \{[\s\S]*?\n        \};/)[0]
