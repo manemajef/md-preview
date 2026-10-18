@@ -1433,14 +1433,27 @@ for (const [label, formula, card] of [
   const host = document.createElement('div')
   document.body.append(host)
   const source = formula + '\n\nAfter'
-  const editor = window.MDEditor.create(host, source, {})
+  let copied = null
+  const editor = window.MDEditor.create(host, source, { onCopyCode: text => { copied = text } })
   editor.focus()
   editor.select(source.indexOf('frac') + 2)
   await new Promise(resolve => setTimeout(resolve, 20))
   check(`${label}: source uses the expected card`, !!host.querySelector('.cm-md-code-card') === card)
-  check(`${label}: no language picker for dollar math`, !host.querySelector('.cm-md-code-language'))
+  check(`${label}: no language picker for dollar math`, !host.querySelector('.cm-md-code-language-input'))
   if (card) check(`${label}: both delimiters stay visible`,
     [...host.querySelectorAll('.cm-md-fence-info')].map(node => node.textContent).join('') === '$$$$')
+  if (card) {
+    host.querySelector('.cm-md-code-copy').click()
+    await Promise.resolve()
+    check(`${label}: shared copy button copies LaTeX without markers`, copied?.includes('\\frac{1}{x}')
+      && !copied.includes('$$') && !copied.includes('>'))
+    host.querySelector('.cm-md-code-toggle-wrap').click()
+    check(`${label}: shared wrap button wraps the card`, !!host.querySelector('.cm-md-code-card-wrapped')
+      && host.querySelector('.cm-md-code-toggle-wrap').getAttribute('aria-pressed') === 'true')
+    host.querySelector('.cm-md-code-toggle-wrap').click()
+    check(`${label}: unwrapping preserves source`, !host.querySelector('.cm-md-code-card-wrapped')
+      && editor.getMarkdown() === source)
+  }
   const closing = source.lastIndexOf('$$')
   if (card) {
     editor.insertTextAt('', closing, closing + 2)
@@ -1455,6 +1468,36 @@ for (const [label, formula, card] of [
   await new Promise(resolve => setTimeout(resolve, 10))
   check(`${label}: leaving source restores only the equation`, !!host.querySelector('.katex')
     && !host.querySelector('.cm-md-code-card') && editor.getMarkdown() === source)
+  editor.destroy()
+  host.remove()
+}
+
+for (const [label, initial, position, expected] of [
+  ['empty document', '', 0, '$$\n\n$$'],
+  ['after prose', 'Intro\n\n', 7, 'Intro\n\n$$\n\n$$'],
+  ['existing closer', '\nx\n$$', 0, '$$\nx\n$$'],
+  ['closing an existing block', '$$\nx\n', 5, '$$\nx\n$$'],
+  ['inside code', '```text\n\n```', 8, '```text\n$$\n```'],
+  ['inside prose', 'Text ', 5, 'Text $$'],
+]) {
+  const host = document.createElement('div')
+  document.body.append(host)
+  const editor = window.MDEditor.create(host, initial, {})
+  editor.select(position)
+  for (const character of '$$') editor.insert(character)
+  check(`dollar completion: ${label}`, editor.getMarkdown() === expected)
+  if (label === 'empty document') {
+    editor.insert('x')
+    check('dollar completion puts typing inside the delimiters', editor.getMarkdown() === '$$\nx\n$$')
+    host.querySelector('.cm-content').dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+      key: 'z', code: 'KeyZ', ctrlKey: true, bubbles: true, cancelable: true,
+    }))
+    check('undoing math input retains the empty paired block', editor.getMarkdown() === '$$\n\n$$')
+    host.querySelector('.cm-content').dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+      key: 'z', code: 'KeyZ', ctrlKey: true, bubbles: true, cancelable: true,
+    }))
+    check('undoing dollar completion leaves no orphan closer', editor.getMarkdown() === '$')
+  }
   editor.destroy()
   host.remove()
 }

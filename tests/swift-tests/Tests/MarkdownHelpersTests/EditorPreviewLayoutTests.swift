@@ -83,6 +83,7 @@ final class EditorPreviewLayoutTests: XCTestCase {
                 return {
                     cards: document.querySelectorAll('.cm-md-code-card').length,
                     language: card?.querySelector('.cm-md-code-language-input')?.value || '',
+                    actions: card?.querySelectorAll('.cm-md-code-action').length,
                     delimiters: delimiters.map(node => node.textContent).join(''),
                     visible: delimiters.every(node => getComputedStyle(node).visibility === 'visible'),
                     scrolls: card && card.scrollWidth > card.clientWidth,
@@ -95,6 +96,7 @@ final class EditorPreviewLayoutTests: XCTestCase {
             let values = try XCTUnwrap(result as? [String: Any])
             XCTAssertEqual(values["cards"] as? Int, 1, formula)
             XCTAssertEqual(values["language"] as? String, fenced ? "math" : "", formula)
+            XCTAssertEqual(values["actions"] as? Int, 2, formula)
             if !fenced {
                 XCTAssertEqual(values["delimiters"] as? String, "$$$$", formula)
                 XCTAssertEqual(values["visible"] as? Bool, true, formula)
@@ -103,10 +105,92 @@ final class EditorPreviewLayoutTests: XCTestCase {
             XCTAssertEqual(values["radius"] as? String, "16px", formula)
             XCTAssertEqual(values["rendered"] as? Bool, false, formula)
             XCTAssertEqual(values["markdown"] as? String, source)
+            let wrapped = try await editor.webView.callAsyncJavaScript("""
+                document.querySelector('.cm-md-code-toggle-wrap').click();
+                for (let i = 0; i < 4; i++) {
+                    window.__layoutTestFrame();
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                }
+                const card = document.querySelector('.cm-md-code-card-wrapped');
+                return !!card && card.scrollWidth <= card.clientWidth
+                    && window.__mdEditor.getMarkdown() === source;
+                """, arguments: ["source": source], in: nil, contentWorld: .page)
+            XCTAssertEqual(wrapped as? Bool, true, formula)
             _ = try await editor.webView.evaluateJavaScript("window.__mdEditor.select(\(source.count))")
             _ = try await editor.layout(texts: [], imageCount: 0,
                 selectors: [".katex": 1, ".cm-md-code-card": 0])
         }
+    }
+
+    func testNativeTypingCompletesDollarMath() async throws {
+        let html = EditorHTML.render(markdown: "",
+            editorJavaScript: try TestVendor.script("md-preview/Vendor/CodeMirror/mdedit.min.js"))
+        let editor = WebViewLayoutHarness(html: html, width: 500, isEditor: true,
+            schemeHandlers: ["md-asset": EditorMathAssets()])
+        let window = NSWindow(contentRect: editor.webView.frame, styleMask: .borderless,
+                              backing: .buffered, defer: false)
+        window.contentView = editor.webView
+        defer { editor.close(); window.contentView = nil }
+        _ = try await editor.layout(texts: [], imageCount: 0)
+        let result = try await editor.webView.callAsyncJavaScript("""
+            document.hasFocus = () => true;
+            window.__mdEditor.focus();
+            const settle = async () => {
+                for (let i = 0; i < 4; i++) {
+                    window.__layoutTestFrame();
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                }
+            };
+            for (const character of '$$') {
+                document.execCommand('insertText', false, character);
+                await settle();
+            }
+            const paired = window.__mdEditor.getMarkdown();
+            const caret = window.__mdEditor.getLinkSelection(false).from;
+            document.execCommand('insertText', false, 'x');
+            await settle();
+            return { paired, caret, markdown: window.__mdEditor.getMarkdown() };
+            """, arguments: [:], in: nil, contentWorld: .page)
+        let values = try XCTUnwrap(result as? [String: Any])
+        XCTAssertEqual(values["paired"] as? String, "$$\n\n$$")
+        XCTAssertEqual(values["caret"] as? Int, 3)
+        XCTAssertEqual(values["markdown"] as? String, "$$\nx\n$$")
+    }
+
+    func testClickingFencedMathHidesRawFences() async throws {
+        let source = "Before\n\n```math\n\\frac{1}{x}\n```\n\nAfter"
+        let html = EditorHTML.render(markdown: source,
+            editorJavaScript: try TestVendor.script("md-preview/Vendor/CodeMirror/mdedit.min.js"))
+        let editor = WebViewLayoutHarness(html: html, width: 500, isEditor: true,
+            schemeHandlers: ["md-asset": EditorMathAssets()])
+        let window = NSWindow(contentRect: editor.webView.frame, styleMask: .borderless,
+                              backing: .buffered, defer: false)
+        window.contentView = editor.webView
+        defer { editor.close(); window.contentView = nil }
+        _ = try await editor.layout(texts: [], imageCount: 0, selectors: [".katex": 1])
+        let result = try await editor.webView.callAsyncJavaScript("""
+            document.hasFocus = () => true;
+            document.querySelector('.math-display').dispatchEvent(new MouseEvent('mousedown', {
+                bubbles: true, cancelable: true
+            }));
+            document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+            for (let i = 0; i < 4; i++) {
+                window.__layoutTestFrame();
+                await new Promise(resolve => setTimeout(resolve, 10));
+            }
+            const raw = [...document.querySelectorAll('.cm-line')].find(line => line.textContent.includes('```math'));
+            return {
+                rawHeight: raw?.getBoundingClientRect().height || 0,
+                language: document.querySelector('.cm-md-code-language-input')?.value,
+                caret: window.__mdEditor.getLinkSelection(false).from,
+                markdown: window.__mdEditor.getMarkdown()
+            };
+            """, arguments: [:], in: nil, contentWorld: .page)
+        let values = try XCTUnwrap(result as? [String: Any])
+        XCTAssertEqual(values["rawHeight"] as? Double, 0)
+        XCTAssertEqual(values["language"] as? String, "math")
+        XCTAssertEqual(values["caret"] as? Int, source.range(of: "\\frac")!.lowerBound.utf16Offset(in: source))
+        XCTAssertEqual(values["markdown"] as? String, source)
     }
 
     func testKeyboardEntryRevealsFencedMathSource() async throws {
