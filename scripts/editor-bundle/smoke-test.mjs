@@ -1361,6 +1361,12 @@ check("find reveals math source", mathHost.textContent.includes('frac') && !!mat
 mathEditor.destroy()
 
 for (const [label, source, count] of [
+  ['inline without spaces', '$x^2$', 1],
+  ['spaces inside both delimiters', '$ x^2 $', 0],
+  ['space after opening delimiter', '$ x^2$', 0],
+  ['space before closing delimiter', '$x^2 $', 0],
+  ['tab after opening delimiter', '$\tx^2$', 0],
+  ['tab before closing delimiter', '$x^2\t$', 0],
   ['adjacent inline formulas', '$x$$y$', 2],
   ['unclosed double delimiter', '$$x$', 0],
   ['currency', 'Pay $5 and $10', 0],
@@ -1439,6 +1445,8 @@ for (const [label, formula, card] of [
   await new Promise(resolve => setTimeout(resolve, 20))
   check(`${label}: source uses the expected card`, !!host.querySelector('.cm-md-code-card') === card)
   check(`${label}: no language picker for dollar math`, !host.querySelector('.cm-md-code-language-input'))
+  if (label === 'inline math') check('active inline math reuses the inline-code content span',
+    host.querySelector('.cm-md-inline-code')?.textContent === '\\frac{1}{x}')
   if (card) check(`${label}: both delimiters stay visible`,
     [...host.querySelectorAll('.cm-md-fence-info')].map(node => node.textContent).join('') === '$$$$')
   check(`${label}: dollar source has no toolbar`, !host.querySelector('.cm-md-code-action'))

@@ -47,6 +47,51 @@ final class EditorPreviewLayoutTests: XCTestCase {
         XCTAssertEqual(saved as? String, source)
     }
 
+    func testInlineMathSourceUsesInlineCodeStyling() async throws {
+        let source = "Code `x^2`; math $x^2$; literal $ x^2 $."
+        let html = EditorHTML.render(markdown: source,
+            editorJavaScript: try TestVendor.script("md-preview/Vendor/CodeMirror/mdedit.min.js"))
+        let editor = WebViewLayoutHarness(html: html, width: 500, isEditor: true,
+            schemeHandlers: ["md-asset": EditorMathAssets()])
+        let window = NSWindow(contentRect: editor.webView.frame, styleMask: .borderless,
+                              backing: .buffered, defer: false)
+        window.contentView = editor.webView
+        defer { editor.close(); window.contentView = nil }
+        _ = try await editor.layout(texts: [], imageCount: 0,
+            selectors: [".katex": 1, ".cm-md-inline-code": 1])
+        let result = try await editor.webView.callAsyncJavaScript("""
+            document.hasFocus = () => true;
+            window.__mdEditor.focus();
+            window.__mdEditor.select(source.indexOf('$x') + 2);
+            for (let i = 0; i < 4; i++) {
+                window.__layoutTestFrame();
+                await new Promise(resolve => setTimeout(resolve, 10));
+            }
+            const spans = [...document.querySelectorAll('.cm-md-inline-code')];
+            const styles = spans.map(span => {
+                const style = getComputedStyle(span);
+                return [style.fontFamily, style.fontSize, style.backgroundColor,
+                    style.border, style.borderRadius, style.padding];
+            });
+            return {
+                content: spans.map(span => span.textContent),
+                sameStyle: styles.length === 2 && JSON.stringify(styles[0]) === JSON.stringify(styles[1]),
+                literal: document.querySelector('.cm-content').textContent.includes('$ x^2 $'),
+                cards: document.querySelectorAll('.cm-md-code-card').length,
+                markdown: window.__mdEditor.getMarkdown()
+            };
+            """, arguments: ["source": source], in: nil, contentWorld: .page)
+        let values = try XCTUnwrap(result as? [String: Any])
+        XCTAssertEqual(values["content"] as? [String], ["x^2", "x^2"])
+        XCTAssertEqual(values["sameStyle"] as? Bool, true)
+        XCTAssertEqual(values["literal"] as? Bool, true)
+        XCTAssertEqual(values["cards"] as? Int, 0)
+        XCTAssertEqual(values["markdown"] as? String, source)
+        _ = try await editor.webView.evaluateJavaScript("window.__mdEditor.select(\(source.count))")
+        _ = try await editor.layout(texts: [], imageCount: 0,
+            selectors: [".katex": 1, ".cm-md-inline-code": 1])
+    }
+
     func testMathSourceUsesTheSharedCodeCard() async throws {
         for (formula, fenced, scrolls) in [
             ("$$\n\\frac{1}{x}\n$$", false, false),

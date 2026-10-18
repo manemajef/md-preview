@@ -1974,6 +1974,8 @@ function decorateMath(state, items, focused) {
           && state.doc.lineAt(item.to).to === item.to,
       }).range(item.from, item.to))
     } else {
+      if (!item.display) ranges.push(Decoration.mark({ class: "cm-md-inline-code" })
+        .range(item.from + 1, item.to - 1))
       highlightTree(texLanguage.parser.parse(item.source), codeHighlight, (from, to, classes) => {
         ranges.push(Decoration.mark({ class: classes }).range(item.from + (item.display ? 2 : 1) + from,
           item.from + (item.display ? 2 : 1) + to))
