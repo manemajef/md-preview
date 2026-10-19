@@ -346,6 +346,54 @@ final class EditorPreviewLayoutTests: XCTestCase {
         }
     }
 
+    func testArrowKeysEnterRenderedMath() async throws {
+        for formula in ["$$x$$", "$$\nx\ny\n$$", "```math\nx\ny\n```",
+                        "> $$\n> x\n> $$", "- $$\n  x\n  $$"] {
+            let source = "Before\n\n" + formula + "\n\nAfter"
+            let html = EditorHTML.render(markdown: source,
+                editorJavaScript: try TestVendor.script("md-preview/Vendor/CodeMirror/mdedit.min.js"))
+            let editor = WebViewLayoutHarness(html: html, width: 500, isEditor: true,
+                schemeHandlers: ["md-asset": EditorMathAssets()])
+            let window = NSWindow(contentRect: editor.webView.frame, styleMask: .borderless,
+                                  backing: .buffered, defer: false)
+            window.contentView = editor.webView
+            defer { editor.close(); window.contentView = nil }
+            _ = try await editor.layout(texts: [], imageCount: 0, selectors: [".katex": 1])
+            let result = try await editor.webView.callAsyncJavaScript("""
+                document.hasFocus = () => true;
+                const settle = async () => {
+                    for (let i = 0; i < 4; i++) window.__layoutTestFrame();
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                };
+                const traces = [];
+                for (const [key, start] of [['ArrowDown', 0], ['ArrowUp', source.length]]) {
+                    window.__mdEditor.focus();
+                    window.__mdEditor.select(start);
+                    await settle();
+                    const positions = [];
+                    for (let i = 0; i < 4; i++) {
+                        document.querySelector('.cm-content').dispatchEvent(new KeyboardEvent('keydown', {
+                            key, code: key, bubbles: true, cancelable: true
+                        }));
+                        await settle();
+                        positions.push({caret: window.__mdEditor.getLinkSelection(false).from,
+                            rendered: !!document.querySelector('.math-display')});
+                    }
+                    traces.push(positions);
+                }
+                return JSON.stringify(traces);
+                """, arguments: ["source": source], in: nil, contentWorld: .page)
+            let json = try XCTUnwrap(result as? String)
+            let traces = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [[[String: Any]]])
+            for trace in traces {
+                XCTAssertTrue(trace.contains { step in
+                    guard let caret = step["caret"] as? Int else { return false }
+                    return (8...(8 + formula.utf16.count)).contains(caret) && step["rendered"] as? Bool == false
+                }, "Skipped \(formula): \(json)")
+            }
+        }
+    }
+
     func testArrowUpEntersPreviousMathAtItsClosingDelimiter() async throws {
         let source = "$$\na\n$$\n\n$$\nb"
         let html = EditorHTML.render(markdown: source,

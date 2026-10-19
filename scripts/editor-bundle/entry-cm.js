@@ -2012,24 +2012,34 @@ const mathPreviews = StateField.define({
   provide: field => EditorView.decorations.from(field, value => value.decorations),
 })
 
-// A block widget reports its opening source position for vertical movement.
-// Approaching from below must visit the intervening line / closing delimiter,
-// rather than reveal the block with the caret teleported to its opening.
-function moveUpIntoMath(view) {
+// Vertical hit-testing can jump past a rendered equation. Enter its source
+// instead, preserving intervening blank lines and leaving wrapped text alone.
+function moveIntoMath(view, forward) {
   const selection = view.state.selection.main
   if (!selection.empty || view.state.selection.ranges.length !== 1 || view.compositionStarted) return false
-  const items = view.state.field(mathPreviews).items
-  if (!items.some(item => item.closed && item.display && item.to < selection.head)) return false
-  const next = view.moveVertically(selection, false)
-  const item = items.find(item => item.closed && item.display && item.to < selection.head
-    && next.head >= item.from && next.head <= item.to)
+  const math = view.state.field(mathPreviews).decorations
+  const fences = view.state.field(mermaidPreviews)
+  if (!math.size && !fences.size) return false
+  const next = view.moveVertically(selection, forward)
+  let item = null
+  for (const decorations of [math, fences]) {
+    decorations.between(Math.min(selection.head, next.head), Math.max(selection.head, next.head), (from, to, value) => {
+      const widget = value.spec.widget
+      if (!(widget instanceof MathWidget) || !widget.display
+          || (forward ? from <= selection.head : to >= selection.head)) return
+      if (!item || (forward ? from < item.from : to > item.to)) item = { from, to, widget }
+    })
+  }
   if (!item) return false
   const current = view.state.doc.lineAt(selection.head)
-  if (current.number <= view.state.doc.lineAt(item.to).number) return false
-  const previous = view.state.doc.line(current.number - 1)
-  const anchor = previous.from > item.to
-    ? Math.min(previous.to, previous.from + selection.head - current.from)
-    : item.to
+  const boundary = view.state.doc.lineAt(forward ? item.from : item.to)
+  const adjacent = current.number === boundary.number ? current
+    : view.state.doc.line(current.number + (forward ? 1 : -1))
+  const outside = forward ? adjacent.to < item.from : adjacent.from > item.to
+  const fence = !forward && fencedCodeAt(view.state, item.from + 1)
+  const anchor = outside ? Math.min(adjacent.to, adjacent.from + selection.head - current.from)
+    : forward ? item.from + item.widget.sourceOffset
+    : fence ? view.state.doc.lineAt(item.to).from - 1 : item.to
   view.dispatch({ selection: { anchor }, scrollIntoView: true, userEvent: "select" })
   return true
 }
@@ -3508,7 +3518,8 @@ window.MDEditor = {
           // editor keeps them visible instead of joining lines.
           Prec.highest(keymap.of([{ key: "Enter", run: continueTaskList }])),
           keymap.of([
-            { key: "ArrowUp", run: moveUpIntoMath },
+            { key: "ArrowUp", run: view => moveIntoMath(view, false) },
+            { key: "ArrowDown", run: view => moveIntoMath(view, true) },
             { key: "Mod-b", run: toggleInlineMark("**") },
             { key: "Mod-i", run: toggleInlineMark("*") },
             { key: "Tab", run: indentMarkdownListItems, shift: indentLess },
