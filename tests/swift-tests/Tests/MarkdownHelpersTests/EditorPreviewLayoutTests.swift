@@ -210,6 +210,41 @@ final class EditorPreviewLayoutTests: XCTestCase {
         XCTAssertEqual(values["markdown"] as? String, "$$\nx\n$$")
     }
 
+    func testClickingMathPreservesOpeningDelimiters() async throws {
+        for (formula, offset) in [("$x$", 1), ("$$x$$", 2), ("$$\nx\n$$", 3)] {
+            let source = "Before\n\n" + formula + "\n\nAfter"
+            let html = EditorHTML.render(markdown: source,
+                editorJavaScript: try TestVendor.script("md-preview/Vendor/CodeMirror/mdedit.min.js"))
+            let editor = WebViewLayoutHarness(html: html, width: 500, isEditor: true,
+                schemeHandlers: ["md-asset": EditorMathAssets()])
+            let window = NSWindow(contentRect: editor.webView.frame, styleMask: .borderless,
+                                  backing: .buffered, defer: false)
+            window.contentView = editor.webView
+            defer { editor.close(); window.contentView = nil }
+            _ = try await editor.layout(texts: [], imageCount: 0, selectors: [".katex": 1])
+            let result = try await editor.webView.callAsyncJavaScript("""
+                document.hasFocus = () => true;
+                document.querySelector('.math').dispatchEvent(new MouseEvent('mousedown', {
+                    bubbles: true, cancelable: true
+                }));
+                document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+                for (let i = 0; i < 4; i++) {
+                    window.__layoutTestFrame();
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                }
+                document.execCommand('insertText', false, 'z');
+                for (let i = 0; i < 4; i++) {
+                    window.__layoutTestFrame();
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                }
+                return window.__mdEditor.getMarkdown();
+                """, arguments: [:], in: nil, contentWorld: .page)
+            var expected = source
+            expected.insert("z", at: expected.index(expected.startIndex, offsetBy: 8 + offset))
+            XCTAssertEqual(result as? String, expected)
+        }
+    }
+
     func testClickingFencedMathHidesRawFences() async throws {
         let source = "Before\n\n```math\n\\frac{1}{x}\n```\n\nAfter"
         let html = EditorHTML.render(markdown: source,

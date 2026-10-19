@@ -190,18 +190,21 @@ class TextWidget extends WidgetType {
 }
 
 class MathWidget extends WidgetType {
-  constructor(source, display) { super(); this.source = source; this.display = display }
-  eq(other) { return this.source === other.source && this.display === other.display }
+  constructor(source, display, sourceOffset) {
+    super(); this.source = source; this.display = display; this.sourceOffset = sourceOffset
+  }
+  eq(other) {
+    return this.source === other.source && this.display === other.display && this.sourceOffset === other.sourceOffset
+  }
   toDOM(view) {
     const element = document.createElement(this.display ? "div" : "span")
     element.className = this.display ? "math math-display" : "math math-inline"
     element.textContent = this.source
-    element.setAttribute("aria-label", "Math formula. Click to edit source.")
+    element.setAttribute("aria-label", window.__mdMathEditLabel || "Math formula. Click to edit source.")
     element.addEventListener("mousedown", event => {
       event.preventDefault()
       const from = view.posAtDOM(element)
-      const fence = fencedCodeAt(view.state, from + 1)
-      const anchor = fence ? Math.min(view.state.doc.lineAt(fence.from).to + 1, fence.to) : from + 1
+      const anchor = from + this.sourceOffset
       view.focus()
       view.dispatch({ selection: { anchor }, userEvent: "select.pointer" })
     })
@@ -1956,7 +1959,7 @@ function collectMath(state) {
     const closed = node.name !== "UnclosedMathBlock"
     const lines = node.node.getChildren("MathLine")
     items.push({ renderSource: lines.length ? lines.map(line => state.doc.sliceString(line.from, line.to)).join("\n") : null,
-      from: node.from, to: node.to, display, closed,
+      from: node.from, to: node.to, sourceFrom: lines[0]?.from ?? node.from + size, display, closed,
       source: state.doc.sliceString(node.from + size, node.to - (closed ? size : 0)) })
     return false
   } })
@@ -1969,7 +1972,8 @@ function decorateMath(state, items, focused) {
   for (const item of items) {
     const active = focused && selection.empty && selection.head >= item.from && selection.head <= item.to
     if (item.closed && !active && !currentFindTouches(state, item.from, item.to)) {
-      ranges.push(Decoration.replace({ widget: new MathWidget(item.renderSource ?? item.source, item.display),
+      ranges.push(Decoration.replace({ widget: new MathWidget(item.renderSource ?? item.source, item.display,
+        item.sourceFrom - item.from),
         block: item.display && state.doc.lineAt(item.from).from === item.from
           && state.doc.lineAt(item.to).to === item.to,
       }).range(item.from, item.to))
@@ -2044,7 +2048,7 @@ function buildMermaidPreviews(state) {
           && !isActive && !currentFindTouches(state, node.from, node.to)) {
         ranges.push(Decoration.replace({
           block: true,
-          widget: new MathWidget(details.source, true),
+          widget: new MathWidget(details.source, true, details.sourceFrom - node.from),
         }).range(node.from, node.to))
         return false
       }

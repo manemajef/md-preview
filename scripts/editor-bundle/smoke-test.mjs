@@ -1331,7 +1331,9 @@ const { createRequire } = await import("node:module")
 const require = createRequire(import.meta.url)
 globalThis.katex = require("../../md-preview/Vendor/KaTeX/katex.min.js")
 const mathSwift = readFileSync(new URL("../../md-preview/Rendering/MarkdownHTML+KaTeX.swift", import.meta.url), "utf8")
-const renderFunction = mathSwift.match(/static let mathElementRenderer = """([\s\S]*?)"""/)[1]
+const renderFunctionMatch = mathSwift.match(/static let mathElementRenderer = """([\s\S]*?)"""/)
+if (!renderFunctionMatch) throw new Error("Could not extract mathElementRenderer from MarkdownHTML+KaTeX.swift")
+const renderFunction = renderFunctionMatch[1]
 dom.window.__mdRenderMathElement = new Function(`${renderFunction}; return renderMathElement`)()
 let mathLoads = 0
 dom.window.__mdLoadMath = () => { mathLoads++; return Promise.resolve() }
@@ -1394,8 +1396,12 @@ for (const [label, source, count] of [
 
 const firstMathHost = document.createElement('div')
 document.body.append(firstMathHost)
+window.__mdMathEditLabel = 'Localized math editing instructions'
 const firstMath = window.MDEditor.create(firstMathHost, '$x^2$ after', {})
 await new Promise(resolve => setTimeout(resolve, 10))
+check('math uses the host-provided accessibility label',
+  firstMathHost.querySelector('.math').getAttribute('aria-label') === window.__mdMathEditLabel)
+delete window.__mdMathEditLabel
 firstMathHost.querySelector('.math').dispatchEvent(new dom.window.MouseEvent('mousedown', {
   bubbles: true, cancelable: true,
 }))
@@ -1404,6 +1410,40 @@ check('clicking a formula at document start reveals source safely', !firstMathHo
   && firstMath.getMarkdown() === '$x^2$ after')
 firstMath.destroy()
 firstMathHost.remove()
+
+for (const [formula, offset] of [
+  ['$x$', 1], ['$$x$$', 2], ['$$ x $$', 2], ['$$\nx\n$$', 3], ['```math\nx\n```', 8],
+]) {
+  const host = document.createElement('div')
+  document.body.append(host)
+  const source = 'Before\n\n' + formula + '\n\nAfter'
+  const editor = window.MDEditor.create(host, source, {})
+  host.querySelector('.math').dispatchEvent(new window.MouseEvent('mousedown', {
+    bubbles: true, cancelable: true,
+  }))
+  document.dispatchEvent(new window.MouseEvent('mouseup', { bubbles: true }))
+  editor.insert('z')
+  const caret = 'Before\n\n'.length + offset
+  check(`clicking math preserves its opening delimiter: ${JSON.stringify(formula)}`,
+    editor.getMarkdown() === source.slice(0, caret) + 'z' + source.slice(caret))
+  editor.destroy()
+  host.remove()
+}
+
+for (const opening of ['> $$\n> x', '- $$\n  x']) {
+  const host = document.createElement('div')
+  document.body.append(host)
+  const source = opening + '\n\n# Outside\n\n$$\ny\n$$'
+  const editor = window.MDEditor.create(host, source, {})
+  await new Promise(resolve => setTimeout(resolve, 10))
+  check(`unfinished math stops at its container: ${JSON.stringify(opening)}`,
+    host.querySelectorAll('.katex').length === 1 && !host.querySelector('.katex-error')
+    && host.querySelector('.cm-content').textContent.includes('Outside')
+    && host.querySelector('.cm-content').textContent.includes('x')
+    && editor.getMarkdown() === source)
+  editor.destroy()
+  host.remove()
+}
 
 const typedMathHost = document.createElement('div')
 document.body.append(typedMathHost)
@@ -1512,7 +1552,9 @@ singleMathHost.remove()
 
 // Exercise the production loader without requiring a network or duplicating it.
 const editorSwift = readFileSync(new URL('../../md-preview/Features/Editor/EditorHTML.swift', import.meta.url), 'utf8')
-const mathLoader = editorSwift.match(/window.__mdLoadMath = function \(\) \{[\s\S]*?\n        \};/)[0]
+const mathLoaderMatch = editorSwift.match(/window\.__mdLoadMath = function \(\) \{[\s\S]*?\n\s*\};/)
+if (!mathLoaderMatch) throw new Error("Could not extract window.__mdLoadMath from EditorHTML.swift")
+const mathLoader = mathLoaderMatch[0]
 dom.window.eval(mathLoader
   .replace(/css.href = .*?;/, "css.href = 'math-test.css';")
   .replace(/script.src = .*?;/, "script.src = 'math-test.js';"))

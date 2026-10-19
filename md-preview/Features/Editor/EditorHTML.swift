@@ -743,6 +743,7 @@ nonisolated enum EditorHTML {
                 return messages;
             })();
             window.__mdTableExpandLabel = \(jsStringLiteral(NSLocalizedString("Expand Table", comment: "Open a table in full screen")));
+            window.__mdMathEditLabel = \(jsStringLiteral(NSLocalizedString("Math formula. Click to edit source.", comment: "Accessibility label for a rendered equation in the editor")));
             window.__mdOpenTablePopup = function (markdown) { post({kind: "tablePopup", markdown}); };
             window.__mdRequestTableContextMenu = function (details) {
                 post(Object.assign({ kind: "tableContextMenu" }, details));

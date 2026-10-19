@@ -36,7 +36,7 @@ export const mathSyntax = {
       let to = cx.lineStart + line.text.length
       let closed = false
       const lines = []
-      while (cx.nextLine()) {
+      while (cx.nextLine() && line.depth >= cx.stack.length) {
         to = cx.lineStart + line.text.length
         if (line.text.slice(line.pos).trim() === "$$") {
           closed = true
